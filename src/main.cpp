@@ -14,6 +14,23 @@ std::string to_string(T value)
 	return ss.str();
 }
 
+std::string to_string(cl_device_type type)
+{
+	std::ostringstream ss;
+	auto add = [&](cl_device_type mask, const char *name) {
+		if(type & mask)
+			ss << (ss.tellp() ? " | " : "") << name;
+	};
+
+	add(CL_DEVICE_TYPE_CPU, "CPU");
+	add(CL_DEVICE_TYPE_GPU, "GPU");
+	add(CL_DEVICE_TYPE_ACCELERATOR, "Accelerator");
+	add(CL_DEVICE_TYPE_DEFAULT, "Default");
+	add(CL_DEVICE_TYPE_CUSTOM, "Custom");
+
+	return ss.tellp() ? ss.str() : "Unknown";
+}
+
 void reportError(cl_int err, const std::string &filename, int line)
 {
 	if(CL_SUCCESS == err)
@@ -95,7 +112,11 @@ int main()
 		// TODO 2.1
 		// Запросите число доступных устройств данной платформы (аналогично тому, как это было сделано для запроса числа доступных платформ - см. секцию "OpenCL Runtime" -> "Query Devices")
 		cl_uint devicesCount = 0;
+		OCL_SAFE_CALL(clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, 0, nullptr, &devicesCount));
+		std::cout << "    Number of devices available on a platform: " << devicesCount << std::endl;
 
+		std::vector<cl_device_id> devices(devicesCount);
+		OCL_SAFE_CALL(clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, devicesCount, devices.data(), nullptr));
 		for(int deviceIndex = 0; deviceIndex < devicesCount; ++deviceIndex)
 		{
 			// TODO 2.2
@@ -104,6 +125,30 @@ int main()
 			// - Тип устройства (видеокарта/процессор/что-то странное)
 			// - Размер памяти устройства в мегабайтах
 			// - Еще пару или более свойств устройства, которые вам покажутся наиболее интересными
+			std::cout << "    Device #" << (deviceIndex + 1) << "/" << devicesCount << std::endl;
+			cl_device_id device = devices[deviceIndex];
+
+			size_t deviceNameSize = 0;
+			OCL_SAFE_CALL(clGetDeviceInfo(device, CL_DEVICE_NAME, 0, nullptr, &deviceNameSize));
+			std::vector<unsigned char> deviceName(deviceNameSize, 0);
+			OCL_SAFE_CALL(clGetDeviceInfo(device, CL_DEVICE_NAME, deviceNameSize, deviceName.data(), nullptr));
+			std::cout << "        Device name: " << deviceName.data() << std::endl;
+
+			cl_device_type deviceType = 0;
+			OCL_SAFE_CALL(clGetDeviceInfo(device, CL_DEVICE_TYPE, sizeof(cl_device_type), &deviceType, nullptr));
+			std::cout << "        Device type: " << to_string(deviceType) << std::endl;
+
+			cl_ulong deviceMemSize = 0;
+			OCL_SAFE_CALL(clGetDeviceInfo(device, CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(cl_ulong), &deviceMemSize, nullptr));
+			std::cout << "        Device memory size: " << deviceMemSize / 1024 / 1024 << " MiB" << std::endl;
+
+			cl_ulong deviceMemCacheSize = 0;
+			OCL_SAFE_CALL(clGetDeviceInfo(device, CL_DEVICE_GLOBAL_MEM_CACHE_SIZE, sizeof(cl_ulong), &deviceMemCacheSize, nullptr));
+			std::cout << "        Device cache size: " << deviceMemCacheSize << " b" << std::endl;
+
+			size_t deviceImageMaxBufferSize = 0;
+			OCL_SAFE_CALL(clGetDeviceInfo(device, CL_DEVICE_IMAGE_MAX_BUFFER_SIZE, sizeof(size_t), &deviceImageMaxBufferSize, nullptr));
+			std::cout << "        Device Image max buffer size: " << deviceImageMaxBufferSize << " pixels" << std::endl;
 		}
 	}
 
