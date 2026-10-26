@@ -5,6 +5,15 @@
 #define GROUP_SIZE_X 16
 #define GROUP_SIZE_Y 16
 
+#define PREFIX_SUM_BLOCK_SIZE (2 * GROUP_SIZE)
+
+#define RADIX_BITS 4
+#define RADIX (1 << RADIX_BITS)
+#define RADIX_MASK (RADIX - 1)
+#define RADIX_SORT_PASSES ((32 + RADIX_BITS - 1) / RADIX_BITS)
+#define RADIX_SORT_VALUES_PER_THREAD 8
+#define RADIX_SORT_BLOCK_SIZE (RADIX_SORT_VALUES_PER_THREAD * GROUP_SIZE)
+
 #define RASSERT_ENABLED 0 // disabled by default, enable for debug by changing 0 to 1, disable before performance evaluation/profiling/commiting
 
 #endif // pragma once
