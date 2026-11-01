@@ -34,7 +34,9 @@ void run(int argc, char** argv)
     //          кроме того есть debugPrintfEXT(...) для вывода в консоль с видеокарты
     //          кроме того используемая библиотека поддерживает rassert-проверки (своеобразные инварианты с уникальным числом) на видеокарте для Vulkan
 
-    ocl::KernelSource ocl_mergeSort(ocl::getMergeSort());
+    ocl::KernelSource ocl_mergeSort01Local(ocl::getMergeSort(), "merge_sort_01_local");
+    ocl::KernelSource ocl_mergeSort02Partition(ocl::getMergeSort(), "merge_sort_02_partition");
+    ocl::KernelSource ocl_mergeSort03Merge(ocl::getMergeSort(), "merge_sort_03_merge");
 
     avk2::KernelSource vk_mergeSort(avk2::getMergeSort());
 
@@ -78,18 +80,22 @@ void run(int argc, char** argv)
     }
 
     // Аллоцируем буферы в VRAM
+    const unsigned int num_blocks = (n + MERGE_SORT_BLOCK_SIZE - 1) / MERGE_SORT_BLOCK_SIZE;
+    unsigned int merge_passes = 0;
+    for (unsigned int sorted_k = MERGE_SORT_BLOCK_SIZE; sorted_k < (unsigned int) n; sorted_k *= 2)
+        ++merge_passes;
     gpu::gpu_mem_32u input_gpu(n);
-    gpu::gpu_mem_32u buffer1_gpu(n), buffer2_gpu(n); // TODO это просто шаблонка, можете переименовать эти буферы, сделать другого размера/типа, удалить часть, добавить новые
-    gpu::gpu_mem_32u buffer_output_gpu(n);
+    gpu::gpu_mem_32u buffer_tmp_gpu(n), buffer_output_gpu(n);
+    gpu::gpu_mem_32u splits_gpu(num_blocks);
 
     // Прогружаем входные данные по PCI-E шине: CPU RAM -> GPU VRAM
     input_gpu.writeN(as.data(), n);
     // Советую занулить (или еще лучше - заполнить какой-то уникальной константой, например 255) все буферы
     // В некоторых случаях это ускоряет отладку, но обратите внимание, что fill реализован через копию множества нулей по PCI-E, то есть он очень медленный
     // Если вам нужно занулять буферы в процессе вычислений - используйте кернел который это сделает (см. кернел fill_buffer_with_zeros)
-    buffer1_gpu.fill(255);
-    buffer2_gpu.fill(255);
+    buffer_tmp_gpu.fill(255);
     buffer_output_gpu.fill(255);
+    splits_gpu.fill(255);
 
     // Запускаем кернел (несколько раз и с замером времени выполнения)
     std::vector<double> times;
@@ -99,8 +105,16 @@ void run(int argc, char** argv)
         // Запускаем кернел, с указанием размера рабочего пространства и передачей всех аргументов
         // Если хотите - можете удалить ветвление здесь и оставить только тот код который соответствует вашему выбору API
         if (context.type() == gpu::Context::TypeOpenCL) {
-            // TODO
-            throw std::runtime_error(CODE_IS_NOT_IMPLEMENTED);
+            gpu::gpu_mem_32u* src = (merge_passes % 2 == 0) ? &buffer_output_gpu : &buffer_tmp_gpu;
+            gpu::gpu_mem_32u* dst = (merge_passes % 2 == 0) ? &buffer_tmp_gpu : &buffer_output_gpu;
+            const gpu::WorkSize ws_blocks(GROUP_SIZE, num_blocks * GROUP_SIZE);
+
+            ocl_mergeSort01Local.exec(ws_blocks, input_gpu, *src, n);
+            for (unsigned int sorted_k = MERGE_SORT_BLOCK_SIZE; sorted_k < (unsigned int) n; sorted_k *= 2) {
+                ocl_mergeSort02Partition.exec(gpu::WorkSize(GROUP_SIZE, num_blocks), *src, splits_gpu, sorted_k, n, num_blocks);
+                ocl_mergeSort03Merge.exec(ws_blocks, *src, splits_gpu, *dst, sorted_k, n);
+                std::swap(src, dst);
+            }
         } else if (context.type() == gpu::Context::TypeCUDA) {
             // TODO
             throw std::runtime_error(CODE_IS_NOT_IMPLEMENTED);
